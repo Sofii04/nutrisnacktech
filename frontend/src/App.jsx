@@ -18,7 +18,7 @@ function App() {
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [productsError, setProductsError] = useState("");
 
-  // Estado del panel admin (crear producto)
+  // Estado del panel admin (crear / editar producto)
   const [newName, setNewName] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [newPrice, setNewPrice] = useState("");
@@ -27,6 +27,9 @@ function App() {
   const [adminSaving, setAdminSaving] = useState(false);
   const [adminMessage, setAdminMessage] = useState("");
   const [adminError, setAdminError] = useState("");
+
+  // Producto en edición (null = creando)
+  const [editingProduct, setEditingProduct] = useState(null);
 
   // Cargar productos (público)
   useEffect(() => {
@@ -160,12 +163,38 @@ function App() {
 
   const isAdmin = !!(currentUser && currentUser.is_admin);
 
-  // Crear producto (solo admin)
-  async function handleCreateProduct(event) {
+  // Limpiar formulario y estado de edición
+  function resetAdminForm() {
+    setNewName("");
+    setNewDescription("");
+    setNewPrice("");
+    setNewImageUrl("");
+    setNewIsActive(true);
+    setEditingProduct(null);
+    setAdminMessage("");
+    setAdminError("");
+  }
+
+  // Preparar formulario para editar
+  function startEditing(product) {
+    setEditingProduct(product);
+    setNewName(product.name || "");
+    setNewDescription(product.description || "");
+    setNewPrice(String(product.price ?? ""));
+    setNewImageUrl(product.image_url || "");
+    setNewIsActive(product.is_active ?? true);
+    setAdminMessage("");
+    setAdminError("");
+  }
+
+  // Crear o actualizar producto (solo admin)
+  async function handleSubmitProduct(event) {
     event.preventDefault();
 
     if (!authToken || !isAdmin) {
-      setAdminError("Debes iniciar sesión como administrador para crear productos.");
+      setAdminError(
+        "Debes iniciar sesión como administrador para crear o editar productos."
+      );
       return;
     }
 
@@ -182,8 +211,22 @@ function App() {
         is_active: newIsActive,
       };
 
-      const res = await fetch(`${API_BASE}/api/products`, {
-        method: "POST",
+      let res;
+      let method;
+      let url;
+
+      if (editingProduct) {
+        // Modo edición
+        method = "PUT";
+        url = `${API_BASE}/api/products/${editingProduct.id}`;
+      } else {
+        // Modo creación
+        method = "POST";
+        url = `${API_BASE}/api/products`;
+      }
+
+      res = await fetch(url, {
+        method,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${authToken}`,
@@ -197,30 +240,84 @@ function App() {
           return;
         }
         if (res.status === 403) {
-          setAdminError("Solo el administrador puede crear productos.");
+          setAdminError(
+            "Solo el administrador puede crear o editar productos."
+          );
           return;
         }
-        throw new Error(`Error al crear producto: ${res.status}`);
+        throw new Error(
+          `Error al ${editingProduct ? "actualizar" : "crear"} producto: ${
+            res.status
+          }`
+        );
       }
 
-      const created = await res.json();
+      const saved = await res.json();
 
-      // Actualizar la lista en pantalla
-      setProducts((prev) => [created, ...prev]);
+      if (editingProduct) {
+        // Actualizar en la lista
+        setProducts((prev) =>
+          prev.map((p) => (p.id === saved.id ? saved : p))
+        );
+        setAdminMessage(`Producto "${saved.name}" actualizado correctamente.`);
+      } else {
+        // Insertar al inicio
+        setProducts((prev) => [saved, ...prev]);
+        setAdminMessage(`Producto "${saved.name}" creado correctamente.`);
+      }
 
-      // Limpiar formulario
-      setNewName("");
-      setNewDescription("");
-      setNewPrice("");
-      setNewImageUrl("");
-      setNewIsActive(true);
-
-      setAdminMessage(`Producto "${created.name}" creado correctamente.`);
+      // Reset (si quieres mantener datos, puedes no resetear en edición)
+      resetAdminForm();
     } catch (err) {
       console.error(err);
-      setAdminError("No se pudo crear el producto. Intenta de nuevo.");
+      setAdminError(
+        `No se pudo ${
+          editingProduct ? "actualizar" : "crear"
+        } el producto. Intenta de nuevo.`
+      );
     } finally {
       setAdminSaving(false);
+    }
+  }
+
+  // Eliminar producto (solo admin)
+  async function handleDeleteProduct(productId, productName) {
+    if (!authToken || !isAdmin) {
+      alert("Debes iniciar sesión como administrador para eliminar productos.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `¿Seguro que deseas eliminar el producto "${productName}"?`
+    );
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/products/${productId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+
+      if (!res.ok) {
+        if (res.status === 403) {
+          alert("Solo el administrador puede eliminar productos.");
+          return;
+        }
+        throw new Error(`Error al eliminar producto: ${res.status}`);
+      }
+
+      // Quitar el producto de la lista en memoria
+      setProducts((prev) => prev.filter((p) => p.id !== productId));
+
+      // Si estabas editando ese producto, resetear formulario
+      if (editingProduct && editingProduct.id === productId) {
+        resetAdminForm();
+      }
+    } catch (err) {
+      console.error(err);
+      alert("No se pudo eliminar el producto. Intenta de nuevo.");
     }
   }
 
@@ -360,11 +457,13 @@ function App() {
           {currentUser && isAdmin && (
             <>
               <p className="mb-3 text-sm text-slate-300">
-                Crea nuevos productos para el catálogo de NutriSnackTech.
+                {editingProduct
+                  ? `Editando producto: "${editingProduct.name}"`
+                  : "Crea nuevos productos para el catálogo de NutriSnackTech."}
               </p>
 
               <form
-                onSubmit={handleCreateProduct}
+                onSubmit={handleSubmitProduct}
                 className="grid gap-3 md:grid-cols-2"
               >
                 <div className="md:col-span-2">
@@ -438,13 +537,29 @@ function App() {
                   </label>
                 </div>
 
-                <div className="md:col-span-2 flex justify-end">
+                <div className="md:col-span-2 flex justify-end gap-2">
+                  {editingProduct && (
+                    <button
+                      type="button"
+                      onClick={resetAdminForm}
+                      className="rounded-lg border border-slate-500 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800"
+                    >
+                      Cancelar edición
+                    </button>
+                  )}
+
                   <button
                     type="submit"
                     disabled={adminSaving}
                     className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-60"
                   >
-                    {adminSaving ? "Guardando..." : "Crear producto"}
+                    {adminSaving
+                      ? editingProduct
+                        ? "Guardando..."
+                        : "Guardando..."
+                      : editingProduct
+                      ? "Guardar cambios"
+                      : "Crear producto"}
                   </button>
                 </div>
               </form>
@@ -517,6 +632,27 @@ function App() {
                         Disponible
                       </span>
                     </div>
+
+                    {isAdmin && (
+                      <div className="mt-3 flex justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() => startEditing(product)}
+                          className="rounded-lg border border-amber-400/70 px-3 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-500/10"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleDeleteProduct(product.id, product.name)
+                          }
+                          className="rounded-lg border border-red-500/60 px-3 py-1 text-xs font-semibold text-red-300 hover:bg-red-500/10"
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </article>
               ))}
