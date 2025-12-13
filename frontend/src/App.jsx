@@ -18,6 +18,16 @@ function App() {
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [productsError, setProductsError] = useState("");
 
+  // Estado del panel admin (crear producto)
+  const [newName, setNewName] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+  const [newPrice, setNewPrice] = useState("");
+  const [newImageUrl, setNewImageUrl] = useState("");
+  const [newIsActive, setNewIsActive] = useState(true);
+  const [adminSaving, setAdminSaving] = useState(false);
+  const [adminMessage, setAdminMessage] = useState("");
+  const [adminError, setAdminError] = useState("");
+
   // Cargar productos (público)
   useEffect(() => {
     async function loadProducts() {
@@ -150,6 +160,70 @@ function App() {
 
   const isAdmin = !!(currentUser && currentUser.is_admin);
 
+  // Crear producto (solo admin)
+  async function handleCreateProduct(event) {
+    event.preventDefault();
+
+    if (!authToken || !isAdmin) {
+      setAdminError("Debes iniciar sesión como administrador para crear productos.");
+      return;
+    }
+
+    try {
+      setAdminSaving(true);
+      setAdminError("");
+      setAdminMessage("");
+
+      const body = {
+        name: newName,
+        description: newDescription || null,
+        price: Number(newPrice),
+        image_url: newImageUrl || null,
+        is_active: newIsActive,
+      };
+
+      const res = await fetch(`${API_BASE}/api/products`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        if (res.status === 422) {
+          setAdminError("Datos inválidos. Revisa nombre y precio.");
+          return;
+        }
+        if (res.status === 403) {
+          setAdminError("Solo el administrador puede crear productos.");
+          return;
+        }
+        throw new Error(`Error al crear producto: ${res.status}`);
+      }
+
+      const created = await res.json();
+
+      // Actualizar la lista en pantalla
+      setProducts((prev) => [created, ...prev]);
+
+      // Limpiar formulario
+      setNewName("");
+      setNewDescription("");
+      setNewPrice("");
+      setNewImageUrl("");
+      setNewIsActive(true);
+
+      setAdminMessage(`Producto "${created.name}" creado correctamente.`);
+    } catch (err) {
+      console.error(err);
+      setAdminError("No se pudo crear el producto. Intenta de nuevo.");
+    } finally {
+      setAdminSaving(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100">
       {/* HEADER */}
@@ -207,8 +281,8 @@ function App() {
 
           {currentUser ? (
             <p className="text-sm text-emerald-300">
-              Ya has iniciado sesión. Más adelante aquí podrás gestionar el catálogo
-              (crear/editar/eliminar) solo si eres administrador.
+              Ya has iniciado sesión. Si eres administrador, puedes gestionar el
+              catálogo en el panel de administración.
             </p>
           ) : (
             <form
@@ -258,7 +332,134 @@ function App() {
           )}
         </section>
 
-        {/* Tarjeta del catálogo */}
+        {/* Panel administrador (solo visible si eres admin) */}
+        <section className="rounded-xl border border-amber-500/40 bg-slate-900/70 p-5 shadow-lg">
+          <div className="mb-3 flex items-center justify-between gap-4">
+            <h2 className="text-base font-semibold text-amber-300 md:text-lg">
+              Panel administrador · Gestión de productos
+            </h2>
+            <span className="rounded-full border border-amber-400/60 px-3 py-1 text-xs font-medium text-amber-300">
+              Solo administrador
+            </span>
+          </div>
+
+          {!currentUser && (
+            <p className="text-sm text-slate-300">
+              Inicia sesión como administrador para crear, editar o eliminar
+              productos.
+            </p>
+          )}
+
+          {currentUser && !isAdmin && (
+            <p className="text-sm text-slate-300">
+              Has iniciado sesión, pero no tienes rol de administrador. Solo un
+              administrador puede gestionar el catálogo.
+            </p>
+          )}
+
+          {currentUser && isAdmin && (
+            <>
+              <p className="mb-3 text-sm text-slate-300">
+                Crea nuevos productos para el catálogo de NutriSnackTech.
+              </p>
+
+              <form
+                onSubmit={handleCreateProduct}
+                className="grid gap-3 md:grid-cols-2"
+              >
+                <div className="md:col-span-2">
+                  <label className="mb-1 block text-xs font-medium text-slate-300">
+                    Nombre del producto
+                  </label>
+                  <input
+                    type="text"
+                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="Ej: Mango deshidratado 100 g"
+                    required
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="mb-1 block text-xs font-medium text-slate-300">
+                    Descripción
+                  </label>
+                  <textarea
+                    className="min-h-[60px] w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
+                    value={newDescription}
+                    onChange={(e) => setNewDescription(e.target.value)}
+                    placeholder="Breve descripción del producto..."
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-300">
+                    Precio (USD)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
+                    value={newPrice}
+                    onChange={(e) => setNewPrice(e.target.value)}
+                    placeholder="Ej: 3.50"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-300">
+                    URL de imagen (temporal)
+                  </label>
+                  <input
+                    type="url"
+                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
+                    value={newImageUrl}
+                    onChange={(e) => setNewImageUrl(e.target.value)}
+                    placeholder="https://..."
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    id="is_active"
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-amber-500"
+                    checked={newIsActive}
+                    onChange={(e) => setNewIsActive(e.target.checked)}
+                  />
+                  <label
+                    htmlFor="is_active"
+                    className="text-xs font-medium text-slate-300"
+                  >
+                    Producto activo / visible en catálogo
+                  </label>
+                </div>
+
+                <div className="md:col-span-2 flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={adminSaving}
+                    className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-60"
+                  >
+                    {adminSaving ? "Guardando..." : "Crear producto"}
+                  </button>
+                </div>
+              </form>
+
+              {adminMessage && (
+                <p className="mt-2 text-xs text-emerald-300">{adminMessage}</p>
+              )}
+              {adminError && (
+                <p className="mt-2 text-xs text-red-400">{adminError}</p>
+              )}
+            </>
+          )}
+        </section>
+
+        {/* Tarjeta del catálogo público */}
         <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-6 shadow-lg">
           <div className="mb-4 flex items-center justify-between gap-4">
             <div>
@@ -284,7 +485,8 @@ function App() {
 
           {!loadingProducts && !productsError && products.length === 0 && (
             <p className="text-sm text-slate-300">
-              Aún no hay productos en el catálogo. Crea algunos desde el backend.
+              Aún no hay productos en el catálogo. Crea algunos desde el panel
+              de administración.
             </p>
           )}
 
