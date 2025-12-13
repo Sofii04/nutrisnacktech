@@ -8,7 +8,7 @@ use Illuminate\Http\Request;
 
 class ProductController extends Controller
 {
-    // GET /api/products  -> lista de productos activos
+    // GET /api/products  -> lista de productos activos (público)
     public function index()
     {
         $products = Product::where('is_active', true)
@@ -18,15 +18,29 @@ class ProductController extends Controller
         return response()->json($products);
     }
 
-    // GET /api/products/{product} -> detalle
+    // GET /api/products/{product} -> detalle (público)
     public function show(Product $product)
     {
         return response()->json($product);
     }
 
-    // POST /api/products  (requiere login)
+    /**
+     * Verifica que el usuario autenticado sea admin.
+     */
+    protected function ensureIsAdmin(Request $request): void
+    {
+        $user = $request->user();
+
+        if (!$user || !$user->is_admin) {
+            abort(403, 'Solo el administrador puede realizar esta acción.');
+        }
+    }
+
+    // POST /api/products  (requiere login + admin)
     public function store(Request $request)
     {
+        $this->ensureIsAdmin($request);
+
         $data = $request->validate([
             'name'        => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
@@ -40,9 +54,11 @@ class ProductController extends Controller
         return response()->json($product, 201);
     }
 
-    // PUT /api/products/{product}  (requiere login)
+    // PUT /api/products/{product}  (requiere login + admin)
     public function update(Request $request, Product $product)
     {
+        $this->ensureIsAdmin($request);
+
         $data = $request->validate([
             'name'        => ['sometimes', 'required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
@@ -56,9 +72,11 @@ class ProductController extends Controller
         return response()->json($product);
     }
 
-    // DELETE /api/products/{product}  (requiere login)
-    public function destroy(Product $product)
+    // DELETE /api/products/{product}  (requiere login + admin)
+    public function destroy(Request $request, Product $product)
     {
+        $this->ensureIsAdmin($request);
+
         $product->delete();
 
         return response()->json([
