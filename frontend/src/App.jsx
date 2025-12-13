@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { storage } from "./firebase";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 const API_BASE = "http://127.0.0.1:8000";
 
@@ -30,6 +32,10 @@ function App() {
 
   // Producto en edición (null = creando)
   const [editingProduct, setEditingProduct] = useState(null);
+
+  // Estado de subida de imagen
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imageUploadError, setImageUploadError] = useState("");
 
   // Cargar productos (público)
   useEffect(() => {
@@ -173,6 +179,8 @@ function App() {
     setEditingProduct(null);
     setAdminMessage("");
     setAdminError("");
+    setUploadingImage(false);
+    setImageUploadError("");
   }
 
   // Preparar formulario para editar
@@ -185,6 +193,45 @@ function App() {
     setNewIsActive(product.is_active ?? true);
     setAdminMessage("");
     setAdminError("");
+    setUploadingImage(false);
+    setImageUploadError("");
+  }
+
+  // Subir imagen a Firebase al seleccionar archivo
+  async function handleImageChange(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    if (!authToken || !isAdmin) {
+      setImageUploadError(
+        "Debes iniciar sesión como administrador para subir imágenes."
+      );
+      return;
+    }
+
+    try {
+      setUploadingImage(true);
+      setImageUploadError("");
+      setAdminMessage("");
+
+      const fileName = `${Date.now()}-${file.name}`;
+      const storageRef = ref(storage, `products/${fileName}`);
+
+      // Subir el archivo al bucket
+      await uploadBytes(storageRef, file);
+
+      // Obtener URL pública
+      const url = await getDownloadURL(storageRef);
+
+      // Guardar en el estado para enviar al backend
+      setNewImageUrl(url);
+      setAdminMessage("Imagen subida correctamente. No olvides guardar el producto.");
+    } catch (err) {
+      console.error(err);
+      setImageUploadError("No se pudo subir la imagen. Intenta de nuevo.");
+    } finally {
+      setUploadingImage(false);
+    }
   }
 
   // Crear o actualizar producto (solo admin)
@@ -201,7 +248,6 @@ function App() {
     try {
       setAdminSaving(true);
       setAdminError("");
-      setAdminMessage("");
 
       const body = {
         name: newName,
@@ -266,7 +312,7 @@ function App() {
         setAdminMessage(`Producto "${saved.name}" creado correctamente.`);
       }
 
-      // Reset (si quieres mantener datos, puedes no resetear en edición)
+      // Reset
       resetAdminForm();
     } catch (err) {
       console.error(err);
@@ -431,7 +477,7 @@ function App() {
 
         {/* Panel administrador (solo visible si eres admin) */}
         <section className="rounded-xl border border-amber-500/40 bg-slate-900/70 p-5 shadow-lg">
-          <div className="mb-3 flex items-center justify-between gap-4">
+          <div className="mb-3 flex items-center justify_between gap-4">
             <h2 className="text-base font-semibold text-amber-300 md:text-lg">
               Panel administrador · Gestión de productos
             </h2>
@@ -510,15 +556,36 @@ function App() {
 
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-300">
-                    URL de imagen (temporal)
+                    Imagen del producto (Firebase)
                   </label>
                   <input
-                    type="url"
-                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
-                    value={newImageUrl}
-                    onChange={(e) => setNewImageUrl(e.target.value)}
-                    placeholder="https://..."
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageChange}
+                    className="w-full text-xs text-slate-200"
                   />
+                  {uploadingImage && (
+                    <p className="mt-1 text-[11px] text-slate-300">
+                      Subiendo imagen...
+                    </p>
+                  )}
+                  {imageUploadError && (
+                    <p className="mt-1 text-[11px] text-red-400">
+                      {imageUploadError}
+                    </p>
+                  )}
+                  {newImageUrl && (
+                    <div className="mt-2">
+                      <p className="mb-1 text-[11px] text-emerald-300">
+                        Imagen subida. Vista previa:
+                      </p>
+                      <img
+                        src={newImageUrl}
+                        alt="Vista previa producto"
+                        className="h-20 w-20 rounded-lg object_cover border border-slate-700"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -550,7 +617,7 @@ function App() {
 
                   <button
                     type="submit"
-                    disabled={adminSaving}
+                    disabled={adminSaving || uploadingImage}
                     className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-60"
                   >
                     {adminSaving
@@ -612,7 +679,18 @@ function App() {
                   key={product.id}
                   className="flex flex-col overflow-hidden rounded-xl border border-slate-800 bg-slate-900/80 shadow-md transition hover:border-amber-400/70 hover:shadow-amber-400/20"
                 >
-                  <div className="h-28 bg-gradient-to-br from-amber-400/40 via-amber-500/20 to-amber-900/30" />
+                  {/* Imagen o degradado */}
+                  {product.image_url ? (
+                    <div className="h-32 w-full overflow-hidden border-b border-slate-800 bg-slate-900">
+                      <img
+                        src={product.image_url}
+                        alt={product.name}
+                        className="h-full w-full object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className="h-32 bg-gradient-to-br from-amber-400/40 via-amber-500/20 to-amber-900/30" />
+                  )}
 
                   <div className="flex flex-1 flex-col gap-2 px-4 py-3">
                     <h3 className="text-sm font-semibold md:text-base">
