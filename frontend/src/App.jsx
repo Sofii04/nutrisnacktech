@@ -1,6 +1,4 @@
 import { useEffect, useState } from "react";
-import { storage } from "./firebase";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 const API_BASE = "http://127.0.0.1:8000";
 
@@ -197,7 +195,7 @@ function App() {
     setImageUploadError("");
   }
 
-  // Subir imagen a Firebase al seleccionar archivo
+  // Subir imagen usando el backend de Laravel
   async function handleImageChange(event) {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
@@ -214,17 +212,34 @@ function App() {
       setImageUploadError("");
       setAdminMessage("");
 
-      const fileName = `${Date.now()}-${file.name}`;
-      const storageRef = ref(storage, `products/${fileName}`);
+      const formData = new FormData();
+      formData.append("image", file);
 
-      // Subir el archivo al bucket
-      await uploadBytes(storageRef, file);
+      const res = await fetch(`${API_BASE}/api/products/upload-image`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          // 👇 NO ponemos Content-Type, lo pone el navegador (multipart/form-data)
+        },
+        body: formData,
+      });
 
-      // Obtener URL pública
-      const url = await getDownloadURL(storageRef);
+      if (!res.ok) {
+        if (res.status === 422) {
+          setImageUploadError("La imagen no es válida o es muy grande (máx. 2MB).");
+          return;
+        }
+        if (res.status === 403) {
+          setImageUploadError("Solo el administrador puede subir imágenes.");
+          return;
+        }
+        throw new Error(`Error al subir imagen: ${res.status}`);
+      }
 
-      // Guardar en el estado para enviar al backend
-      setNewImageUrl(url);
+      const data = await res.json();
+
+      // Guardar URL devuelta por Laravel
+      setNewImageUrl(data.url);
       setAdminMessage("Imagen subida correctamente. No olvides guardar el producto.");
     } catch (err) {
       console.error(err);
@@ -418,7 +433,7 @@ function App() {
       <main className="mx-auto max-w-5xl px-4 py-8 space-y-6">
         {/* Tarjeta de autenticación */}
         <section className="rounded-xl border border-slate-800 bg-slate-900/70 p-5 shadow-lg">
-          <h2 className="mb-3 text-base font-semibold md:text-lg">
+          <h2 className="mb-3 text_base font-semibold md:text-lg">
             Autenticación
           </h2>
 
@@ -477,7 +492,7 @@ function App() {
 
         {/* Panel administrador (solo visible si eres admin) */}
         <section className="rounded-xl border border-amber-500/40 bg-slate-900/70 p-5 shadow-lg">
-          <div className="mb-3 flex items-center justify_between gap-4">
+          <div className="mb-3 flex items-center justify-between gap-4">
             <h2 className="text-base font-semibold text-amber-300 md:text-lg">
               Panel administrador · Gestión de productos
             </h2>
@@ -556,7 +571,7 @@ function App() {
 
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-300">
-                    Imagen del producto (Firebase)
+                    Imagen del producto (Laravel Storage)
                   </label>
                   <input
                     type="file"
@@ -582,7 +597,7 @@ function App() {
                       <img
                         src={newImageUrl}
                         alt="Vista previa producto"
-                        className="h-20 w-20 rounded-lg object_cover border border-slate-700"
+                        className="h-20 w-20 rounded-lg object-cover border border-slate-700"
                       />
                     </div>
                   )}
