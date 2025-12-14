@@ -9,7 +9,11 @@ function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
 
-  // Campos del formulario de login
+  // Modo del formulario de auth: "login" o "register"
+  const [authMode, setAuthMode] = useState("login");
+
+  // Campos del formulario de login / registro
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("sofy@test.com");
   const [password, setPassword] = useState("password123");
 
@@ -30,6 +34,10 @@ function App() {
 
   // Producto en edición (null = creando)
   const [editingProduct, setEditingProduct] = useState(null);
+
+  // Estado de subida de imagen
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imageUploadError, setImageUploadError] = useState("");
 
   // Cargar productos (público)
   useEffect(() => {
@@ -123,9 +131,56 @@ function App() {
       setAuthToken(token);
       setCurrentUser(data.user);
       localStorage.setItem("nutrisnacktech_token", token);
+      setAuthMode("login"); // por si venías de register
     } catch (err) {
       console.error(err);
       setAuthError("No se pudo iniciar sesión. Inténtalo de nuevo.");
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  // Registro
+  async function handleRegister(event) {
+    event.preventDefault();
+    try {
+      setAuthLoading(true);
+      setAuthError("");
+
+      const res = await fetch(`${API_BASE}/api/auth/register`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name,
+          email,
+          password,
+          password_confirmation: password,
+        }),
+      });
+
+      if (!res.ok) {
+        if (res.status === 422) {
+          setAuthError(
+            "Datos inválidos o correo ya registrado. Revisa nombre, correo y contraseña."
+          );
+          return;
+        }
+        throw new Error(`Error en registro: ${res.status}`);
+      }
+
+      const data = await res.json();
+
+      const token = data.token;
+      setAuthToken(token);
+      setCurrentUser(data.user);
+      localStorage.setItem("nutrisnacktech_token", token);
+      setAuthMode("login");
+      setAuthError("");
+    } catch (err) {
+      console.error(err);
+      setAuthError("No se pudo registrar el usuario. Inténtalo de nuevo.");
     } finally {
       setAuthLoading(false);
     }
@@ -173,6 +228,8 @@ function App() {
     setEditingProduct(null);
     setAdminMessage("");
     setAdminError("");
+    setUploadingImage(false);
+    setImageUploadError("");
   }
 
   // Preparar formulario para editar
@@ -185,6 +242,62 @@ function App() {
     setNewIsActive(product.is_active ?? true);
     setAdminMessage("");
     setAdminError("");
+    setUploadingImage(false);
+    setImageUploadError("");
+  }
+
+  // Subir imagen usando el backend de Laravel
+  async function handleImageChange(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    if (!authToken || !isAdmin) {
+      setImageUploadError(
+        "Debes iniciar sesión como administrador para subir imágenes."
+      );
+      return;
+    }
+
+    try {
+      setUploadingImage(true);
+      setImageUploadError("");
+      setAdminMessage("");
+
+      const formData = new FormData();
+      formData.append("image", file);
+
+      const res = await fetch(`${API_BASE}/api/products/upload-image`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          // NO ponemos Content-Type, lo añade el navegador (multipart/form-data)
+        },
+        body: formData,
+      });
+
+      if (!res.ok) {
+        if (res.status === 422) {
+          setImageUploadError("La imagen no es válida o es muy grande (máx. 2MB).");
+          return;
+        }
+        if (res.status === 403) {
+          setImageUploadError("Solo el administrador puede subir imágenes.");
+          return;
+        }
+        throw new Error(`Error al subir imagen: ${res.status}`);
+      }
+
+      const data = await res.json();
+
+      // Guardar URL devuelta por Laravel
+      setNewImageUrl(data.url);
+      setAdminMessage("Imagen subida correctamente. No olvides guardar el producto.");
+    } catch (err) {
+      console.error(err);
+      setImageUploadError("No se pudo subir la imagen. Intenta de nuevo.");
+    } finally {
+      setUploadingImage(false);
+    }
   }
 
   // Crear o actualizar producto (solo admin)
@@ -201,7 +314,6 @@ function App() {
     try {
       setAdminSaving(true);
       setAdminError("");
-      setAdminMessage("");
 
       const body = {
         name: newName,
@@ -266,7 +378,7 @@ function App() {
         setAdminMessage(`Producto "${saved.name}" creado correctamente.`);
       }
 
-      // Reset (si quieres mantener datos, puedes no resetear en edición)
+      // Reset
       resetAdminForm();
     } catch (err) {
       console.error(err);
@@ -369,19 +481,54 @@ function App() {
       </header>
 
       {/* MAIN */}
-      <main className="mx-auto max-w-5xl px-4 py-8 space-y-6">
+      <main className="mx-auto max-w-5xl space-y-6 px-4 py-8">
         {/* Tarjeta de autenticación */}
         <section className="rounded-xl border border-slate-800 bg-slate-900/70 p-5 shadow-lg">
-          <h2 className="mb-3 text-base font-semibold md:text-lg">
-            Autenticación
-          </h2>
+          <div className="mb-3 flex items-center justify-between gap-4">
+            <h2 className="text-base font-semibold md:text-lg">
+              Autenticación
+            </h2>
+
+            {!currentUser && (
+              <div className="flex gap-2 rounded-full border border-slate-700 bg-slate-900 p-1 text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("login");
+                    setAuthError("");
+                  }}
+                  className={`rounded-full px-3 py-1 font-medium ${
+                    authMode === "login"
+                      ? "bg-amber-500 text-slate-950"
+                      : "text-slate-200"
+                  }`}
+                >
+                  Iniciar sesión
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("register");
+                    setAuthError("");
+                  }}
+                  className={`rounded-full px-3 py-1 font-medium ${
+                    authMode === "register"
+                      ? "bg-amber-500 text-slate-950"
+                      : "text-slate-200"
+                  }`}
+                >
+                  Crear cuenta
+                </button>
+              </div>
+            )}
+          </div>
 
           {currentUser ? (
             <p className="text-sm text-emerald-300">
               Ya has iniciado sesión. Si eres administrador, puedes gestionar el
               catálogo en el panel de administración.
             </p>
-          ) : (
+          ) : authMode === "login" ? (
             <form
               onSubmit={handleLogin}
               className="flex flex-col gap-3 md:flex-row md:items-end"
@@ -421,6 +568,63 @@ function App() {
               >
                 {authLoading ? "Iniciando..." : "Iniciar sesión"}
               </button>
+            </form>
+          ) : (
+            <form
+              onSubmit={handleRegister}
+              className="grid gap-3 md:grid-cols-3 md:items-end"
+            >
+              <div className="md:col-span-1">
+                <label className="mb-1 block text-xs font-medium text-slate-300">
+                  Nombre
+                </label>
+                <input
+                  type="text"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Tu nombre"
+                  required
+                />
+              </div>
+
+              <div className="md:col-span-1">
+                <label className="mb-1 block text-xs font-medium text-slate-300">
+                  Correo electrónico
+                </label>
+                <input
+                  type="email"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="tu-correo@ejemplo.com"
+                  required
+                />
+              </div>
+
+              <div className="md:col-span-1">
+                <label className="mb-1 block text-xs font-medium text-slate-300">
+                  Contraseña
+                </label>
+                <input
+                  type="password"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                />
+              </div>
+
+              <div className="md:col-span-3 flex justify-end">
+                <button
+                  type="submit"
+                  disabled={authLoading}
+                  className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-60"
+                >
+                  {authLoading ? "Creando cuenta..." : "Crear cuenta"}
+                </button>
+              </div>
             </form>
           )}
 
@@ -510,15 +714,36 @@ function App() {
 
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-300">
-                    URL de imagen (temporal)
+                    Imagen del producto (Laravel Storage)
                   </label>
                   <input
-                    type="url"
-                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
-                    value={newImageUrl}
-                    onChange={(e) => setNewImageUrl(e.target.value)}
-                    placeholder="https://..."
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageChange}
+                    className="w-full text-xs text-slate-200"
                   />
+                  {uploadingImage && (
+                    <p className="mt-1 text-[11px] text-slate-300">
+                      Subiendo imagen...
+                    </p>
+                  )}
+                  {imageUploadError && (
+                    <p className="mt-1 text-[11px] text-red-400">
+                      {imageUploadError}
+                    </p>
+                  )}
+                  {newImageUrl && (
+                    <div className="mt-2">
+                      <p className="mb-1 text-[11px] text-emerald-300">
+                        Imagen subida. Vista previa:
+                      </p>
+                      <img
+                        src={newImageUrl}
+                        alt="Vista previa producto"
+                        className="h-20 w-20 rounded-lg object-cover border border-slate-700"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -550,7 +775,7 @@ function App() {
 
                   <button
                     type="submit"
-                    disabled={adminSaving}
+                    disabled={adminSaving || uploadingImage}
                     className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-60"
                   >
                     {adminSaving
@@ -612,7 +837,18 @@ function App() {
                   key={product.id}
                   className="flex flex-col overflow-hidden rounded-xl border border-slate-800 bg-slate-900/80 shadow-md transition hover:border-amber-400/70 hover:shadow-amber-400/20"
                 >
-                  <div className="h-28 bg-gradient-to-br from-amber-400/40 via-amber-500/20 to-amber-900/30" />
+                  {/* Imagen o degradado */}
+                  {product.image_url ? (
+                    <div className="h-32 w-full overflow-hidden border-b border-slate-800 bg-slate-900">
+                      <img
+                        src={product.image_url}
+                        alt={product.name}
+                        className="h-full w-full object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className="h-32 bg-gradient-to-br from-amber-400/40 via-amber-500/20 to-amber-900/30" />
+                  )}
 
                   <div className="flex flex-1 flex-col gap-2 px-4 py-3">
                     <h3 className="text-sm font-semibold md:text-base">
