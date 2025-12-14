@@ -9,7 +9,11 @@ function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
 
-  // Campos del formulario de login
+  // Modo del formulario de auth: "login" o "register"
+  const [authMode, setAuthMode] = useState("login");
+
+  // Campos del formulario de login / registro
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("sofy@test.com");
   const [password, setPassword] = useState("password123");
 
@@ -127,9 +131,56 @@ function App() {
       setAuthToken(token);
       setCurrentUser(data.user);
       localStorage.setItem("nutrisnacktech_token", token);
+      setAuthMode("login"); // por si venías de register
     } catch (err) {
       console.error(err);
       setAuthError("No se pudo iniciar sesión. Inténtalo de nuevo.");
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  // Registro
+  async function handleRegister(event) {
+    event.preventDefault();
+    try {
+      setAuthLoading(true);
+      setAuthError("");
+
+      const res = await fetch(`${API_BASE}/api/auth/register`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name,
+          email,
+          password,
+          password_confirmation: password,
+        }),
+      });
+
+      if (!res.ok) {
+        if (res.status === 422) {
+          setAuthError(
+            "Datos inválidos o correo ya registrado. Revisa nombre, correo y contraseña."
+          );
+          return;
+        }
+        throw new Error(`Error en registro: ${res.status}`);
+      }
+
+      const data = await res.json();
+
+      const token = data.token;
+      setAuthToken(token);
+      setCurrentUser(data.user);
+      localStorage.setItem("nutrisnacktech_token", token);
+      setAuthMode("login");
+      setAuthError("");
+    } catch (err) {
+      console.error(err);
+      setAuthError("No se pudo registrar el usuario. Inténtalo de nuevo.");
     } finally {
       setAuthLoading(false);
     }
@@ -219,7 +270,7 @@ function App() {
         method: "POST",
         headers: {
           Authorization: `Bearer ${authToken}`,
-          // 👇 NO ponemos Content-Type, lo pone el navegador (multipart/form-data)
+          // NO ponemos Content-Type, lo añade el navegador (multipart/form-data)
         },
         body: formData,
       });
@@ -430,19 +481,54 @@ function App() {
       </header>
 
       {/* MAIN */}
-      <main className="mx-auto max-w-5xl px-4 py-8 space-y-6">
+      <main className="mx-auto max-w-5xl space-y-6 px-4 py-8">
         {/* Tarjeta de autenticación */}
         <section className="rounded-xl border border-slate-800 bg-slate-900/70 p-5 shadow-lg">
-          <h2 className="mb-3 text_base font-semibold md:text-lg">
-            Autenticación
-          </h2>
+          <div className="mb-3 flex items-center justify-between gap-4">
+            <h2 className="text-base font-semibold md:text-lg">
+              Autenticación
+            </h2>
+
+            {!currentUser && (
+              <div className="flex gap-2 rounded-full border border-slate-700 bg-slate-900 p-1 text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("login");
+                    setAuthError("");
+                  }}
+                  className={`rounded-full px-3 py-1 font-medium ${
+                    authMode === "login"
+                      ? "bg-amber-500 text-slate-950"
+                      : "text-slate-200"
+                  }`}
+                >
+                  Iniciar sesión
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("register");
+                    setAuthError("");
+                  }}
+                  className={`rounded-full px-3 py-1 font-medium ${
+                    authMode === "register"
+                      ? "bg-amber-500 text-slate-950"
+                      : "text-slate-200"
+                  }`}
+                >
+                  Crear cuenta
+                </button>
+              </div>
+            )}
+          </div>
 
           {currentUser ? (
             <p className="text-sm text-emerald-300">
               Ya has iniciado sesión. Si eres administrador, puedes gestionar el
               catálogo en el panel de administración.
             </p>
-          ) : (
+          ) : authMode === "login" ? (
             <form
               onSubmit={handleLogin}
               className="flex flex-col gap-3 md:flex-row md:items-end"
@@ -482,6 +568,63 @@ function App() {
               >
                 {authLoading ? "Iniciando..." : "Iniciar sesión"}
               </button>
+            </form>
+          ) : (
+            <form
+              onSubmit={handleRegister}
+              className="grid gap-3 md:grid-cols-3 md:items-end"
+            >
+              <div className="md:col-span-1">
+                <label className="mb-1 block text-xs font-medium text-slate-300">
+                  Nombre
+                </label>
+                <input
+                  type="text"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Tu nombre"
+                  required
+                />
+              </div>
+
+              <div className="md:col-span-1">
+                <label className="mb-1 block text-xs font-medium text-slate-300">
+                  Correo electrónico
+                </label>
+                <input
+                  type="email"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="tu-correo@ejemplo.com"
+                  required
+                />
+              </div>
+
+              <div className="md:col-span-1">
+                <label className="mb-1 block text-xs font-medium text-slate-300">
+                  Contraseña
+                </label>
+                <input
+                  type="password"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                />
+              </div>
+
+              <div className="md:col-span-3 flex justify-end">
+                <button
+                  type="submit"
+                  disabled={authLoading}
+                  className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-60"
+                >
+                  {authLoading ? "Creando cuenta..." : "Crear cuenta"}
+                </button>
+              </div>
             </form>
           )}
 
