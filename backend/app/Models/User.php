@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Product;
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -11,6 +12,7 @@ use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
 {
+
     /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
 
@@ -49,4 +51,12 @@ class User extends Authenticatable
             'is_admin' => 'boolean',     
   ];
     }
+    /** Productos marcados como favoritos por el usuario. */
+    public function favoriteProducts()
+    {
+        return $this->belongsToMany(Product::class, 'favorites')
+            ->withTimestamps();
+    }
+
+
 }

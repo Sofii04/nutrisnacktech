@@ -1,901 +1,1003 @@
 import { useEffect, useState } from "react";
+import "./index.css";
 
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = "http://127.0.0.1:8000/api";
 
 function App() {
-  // Estado de autenticación
-  const [authToken, setAuthToken] = useState(null);
-  const [currentUser, setCurrentUser] = useState(null);
+  // =========================
+  // AUTH
+  // =========================
+  const [authToken, setAuthToken] = useState(() => {
+    return localStorage.getItem("token") || "";
+  });
+
+  const [user, setUser] = useState(() => {
+    try {
+      const raw = localStorage.getItem("user");
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const isLoggedIn = !!authToken;
+  const isAdmin = !!(user && user.is_admin);
+
+  const [authMode, setAuthMode] = useState("login"); // "login" | "register"
+  const [authEmail, setAuthEmail] = useState("");
+  const [authName, setAuthName] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authPasswordConfirm, setAuthPasswordConfirm] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
 
-  // Modo del formulario de auth: "login" o "register"
-  const [authMode, setAuthMode] = useState("login");
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError("");
+    setAuthLoading(true);
 
-  // Campos del formulario de login / registro
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("sofy@test.com");
-  const [password, setPassword] = useState("password123");
+    try {
+      const endpoint =
+        authMode === "login" ? "/auth/login" : "/auth/register";
 
-  // Estado del catálogo
+      const payload =
+        authMode === "login"
+          ? {
+              email: authEmail,
+              password: authPassword,
+            }
+          : {
+              name: authName,
+              email: authEmail,
+              password: authPassword,
+              password_confirmation: authPasswordConfirm,
+            };
+
+      const response = await fetch(`${API_BASE}${endpoint}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const msg =
+          errorData.message ||
+          "No se pudo completar la autenticación. Revisa tus datos.";
+        throw new Error(msg);
+      }
+
+      const data = await response.json();
+
+      // API devuelve: { message, user, token }
+      if (data.token && data.user) {
+        setAuthToken(data.token);
+        setUser(data.user);
+        localStorage.setItem("token", data.token);
+        localStorage.setItem("user", JSON.stringify(data.user));
+        setAuthPassword("");
+        setAuthPasswordConfirm("");
+      }
+    } catch (error) {
+      console.error(error);
+      setAuthError(error.message || "Ocurrió un error inesperado.");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      if (authToken) {
+        await fetch(`${API_BASE}/auth/logout`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+          },
+        });
+      }
+    } catch (e) {
+      console.warn("Error al cerrar sesión en el backend (se ignora)", e);
+    } finally {
+      setAuthToken("");
+      setUser(null);
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+    }
+  };
+
+  // =========================
+// FRASE MOTIVACIONAL (API externa)
+// =========================
+const [quote, setQuote] = useState(null);
+const [loadingQuote, setLoadingQuote] = useState(false);
+const [quoteError, setQuoteError] = useState("");
+
+const fetchMotivationalQuote = async () => {
+  try {
+    setLoadingQuote(true);
+    setQuoteError("");
+
+    const response = await fetch(`${API_BASE}/motivation`);
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || "No se pudo obtener la frase motivacional.");
+    }
+
+    if (data.text) {
+      setQuote({
+        text: data.text,
+        author: data.author || "Anónimo",
+      });
+      setQuoteError("");
+    } else {
+      setQuoteError("No se recibió una frase válida.");
+    }
+  } catch (error) {
+    console.error("Error al cargar la frase motivacional:", error);
+    setQuote({
+      text: "Cree en ti misma; cada pequeño paso cuenta 💚",
+      author: "NutriSnackTech",
+    });
+    setQuoteError("");
+  } finally {
+    setLoadingQuote(false);
+  }
+};
+
+  // =========================
+  // CATÁLOGO DE PRODUCTOS
+  // =========================
   const [products, setProducts] = useState([]);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [productsError, setProductsError] = useState("");
 
-  // Estado del panel admin (crear / editar producto)
-  const [newName, setNewName] = useState("");
-  const [newDescription, setNewDescription] = useState("");
-  const [newPrice, setNewPrice] = useState("");
-  const [newImageUrl, setNewImageUrl] = useState("");
-  const [newIsActive, setNewIsActive] = useState(true);
-  const [adminSaving, setAdminSaving] = useState(false);
-  const [adminMessage, setAdminMessage] = useState("");
+  const fetchProducts = async () => {
+    try {
+      setLoadingProducts(true);
+      setProductsError("");
+      const response = await fetch(`${API_BASE}/products`);
+      if (!response.ok) {
+        throw new Error("No se pudo cargar el catálogo de productos.");
+      }
+      const data = await response.json();
+      setProducts(data);
+    } catch (error) {
+      console.error(error);
+      setProductsError("Ocurrió un error al cargar los productos.");
+    } finally {
+      setLoadingProducts(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+
+  // Cargar una frase motivacional al entrar a la app
+useEffect(() => {
+  fetchMotivationalQuote();
+}, []);
+
+  // =========================
+  // FAVORITOS
+  // =========================
+  const [favoriteProductIds, setFavoriteProductIds] = useState([]);
+
+  const loadFavorites = async () => {
+    if (!authToken) {
+      setFavoriteProductIds([]);
+      return;
+    }
+    try {
+      const response = await fetch(`${API_BASE}/favorites`, {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+      if (!response.ok) {
+        throw new Error("No se pudieron cargar los favoritos.");
+      }
+      const data = await response.json();
+      // Soportar tanto {product_id} como {product: {id}}
+      const ids = data
+        .map((item) => item.product_id ?? item.product?.id)
+        .filter(Boolean);
+      setFavoriteProductIds(ids);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  useEffect(() => {
+    loadFavorites();
+  }, [authToken]);
+
+  const handleFavoriteToggle = async (productId) => {
+    if (!authToken) {
+      alert("Debes iniciar sesión para marcar favoritos.");
+      return;
+    }
+    try {
+      const response = await fetch(
+        `${API_BASE}/products/${productId}/favorite`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("No se pudo actualizar el favorito.");
+      }
+
+      // Toggle local
+      setFavoriteProductIds((prev) =>
+        prev.includes(productId)
+          ? prev.filter((id) => id !== productId)
+          : [...prev, productId]
+      );
+    } catch (error) {
+      console.error(error);
+      alert("Ocurrió un error al marcar como favorito.");
+    }
+  };
+
+  const isFavorite = (productId) => favoriteProductIds.includes(productId);
+
+  // =========================
+  // ADMIN: CRUD PRODUCTOS
+  // =========================
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [adminName, setAdminName] = useState("");
+  const [adminDescription, setAdminDescription] = useState("");
+  const [adminPrice, setAdminPrice] = useState("");
+  const [adminImageFile, setAdminImageFile] = useState(null);
+  const [adminLoading, setAdminLoading] = useState(false);
   const [adminError, setAdminError] = useState("");
 
-  // Producto en edición (null = creando)
-  const [editingProduct, setEditingProduct] = useState(null);
-
-  // Estado de subida de imagen
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const [imageUploadError, setImageUploadError] = useState("");
-
-  // Cargar productos (público)
-  useEffect(() => {
-    async function loadProducts() {
-      try {
-        setLoadingProducts(true);
-        setProductsError("");
-
-        const res = await fetch(`${API_BASE}/api/products`);
-
-        if (!res.ok) {
-          throw new Error(`Error al cargar productos: ${res.status}`);
-        }
-
-        const data = await res.json();
-        setProducts(data);
-      } catch (err) {
-        console.error(err);
-        setProductsError("No se pudo cargar el catálogo de productos.");
-      } finally {
-        setLoadingProducts(false);
-      }
-    }
-
-    loadProducts();
-  }, []);
-
-  // Recuperar token desde localStorage al iniciar
-  useEffect(() => {
-    const storedToken = localStorage.getItem("nutrisnacktech_token");
-    if (storedToken) {
-      setAuthToken(storedToken);
-      fetchCurrentUser(storedToken);
-    }
-  }, []);
-
-  async function fetchCurrentUser(token) {
-    try {
-      setAuthLoading(true);
-      setAuthError("");
-
-      const res = await fetch(`${API_BASE}/api/auth/me`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!res.ok) {
-        throw new Error("No se pudo recuperar la sesión.");
-      }
-
-      const data = await res.json();
-      setCurrentUser(data);
-    } catch (err) {
-      console.error(err);
-      setAuthError("La sesión no es válida. Inicia sesión de nuevo.");
-      setAuthToken(null);
-      setCurrentUser(null);
-      localStorage.removeItem("nutrisnacktech_token");
-    } finally {
-      setAuthLoading(false);
-    }
-  }
-
-  // Login
-  async function handleLogin(event) {
-    event.preventDefault();
-    try {
-      setAuthLoading(true);
-      setAuthError("");
-
-      const res = await fetch(`${API_BASE}/api/auth/login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (!res.ok) {
-        if (res.status === 422) {
-          setAuthError("Credenciales inválidas. Verifica tu correo y contraseña.");
-          return;
-        }
-        throw new Error(`Error en login: ${res.status}`);
-      }
-
-      const data = await res.json();
-
-      const token = data.token;
-      setAuthToken(token);
-      setCurrentUser(data.user);
-      localStorage.setItem("nutrisnacktech_token", token);
-      setAuthMode("login"); // por si venías de register
-    } catch (err) {
-      console.error(err);
-      setAuthError("No se pudo iniciar sesión. Inténtalo de nuevo.");
-    } finally {
-      setAuthLoading(false);
-    }
-  }
-
-  // Registro
-  async function handleRegister(event) {
-    event.preventDefault();
-    try {
-      setAuthLoading(true);
-      setAuthError("");
-
-      const res = await fetch(`${API_BASE}/api/auth/register`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name,
-          email,
-          password,
-          password_confirmation: password,
-        }),
-      });
-
-      if (!res.ok) {
-        if (res.status === 422) {
-          setAuthError(
-            "Datos inválidos o correo ya registrado. Revisa nombre, correo y contraseña."
-          );
-          return;
-        }
-        throw new Error(`Error en registro: ${res.status}`);
-      }
-
-      const data = await res.json();
-
-      const token = data.token;
-      setAuthToken(token);
-      setCurrentUser(data.user);
-      localStorage.setItem("nutrisnacktech_token", token);
-      setAuthMode("login");
-      setAuthError("");
-    } catch (err) {
-      console.error(err);
-      setAuthError("No se pudo registrar el usuario. Inténtalo de nuevo.");
-    } finally {
-      setAuthLoading(false);
-    }
-  }
-
-  // Logout
-  async function handleLogout() {
-    if (!authToken) {
-      setAuthToken(null);
-      setCurrentUser(null);
-      localStorage.removeItem("nutrisnacktech_token");
-      return;
-    }
-
-    try {
-      setAuthLoading(true);
-      setAuthError("");
-
-      await fetch(`${API_BASE}/api/auth/logout`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-      });
-    } catch (err) {
-      console.error(err);
-      // aunque falle, limpiamos el lado cliente
-    } finally {
-      setAuthLoading(false);
-      setAuthToken(null);
-      setCurrentUser(null);
-      localStorage.removeItem("nutrisnacktech_token");
-    }
-  }
-
-  const isAdmin = !!(currentUser && currentUser.is_admin);
-
-  // Limpiar formulario y estado de edición
-  function resetAdminForm() {
-    setNewName("");
-    setNewDescription("");
-    setNewPrice("");
-    setNewImageUrl("");
-    setNewIsActive(true);
+  const resetAdminForm = () => {
     setEditingProduct(null);
-    setAdminMessage("");
+    setAdminName("");
+    setAdminDescription("");
+    setAdminPrice("");
+    setAdminImageFile(null);
     setAdminError("");
-    setUploadingImage(false);
-    setImageUploadError("");
-  }
+  };
 
-  // Preparar formulario para editar
-  function startEditing(product) {
+  const startEditProduct = (product) => {
     setEditingProduct(product);
-    setNewName(product.name || "");
-    setNewDescription(product.description || "");
-    setNewPrice(String(product.price ?? ""));
-    setNewImageUrl(product.image_url || "");
-    setNewIsActive(product.is_active ?? true);
-    setAdminMessage("");
+    setAdminName(product.name || "");
+    setAdminDescription(product.description || "");
+    setAdminPrice(product.price || "");
+    setAdminImageFile(null);
+  };
+
+  const handleAdminSubmit = async (e) => {
+    e.preventDefault();
+    if (!authToken) {
+      alert("Debes iniciar sesión como admin.");
+      return;
+    }
     setAdminError("");
-    setUploadingImage(false);
-    setImageUploadError("");
-  }
-
-  // Subir imagen usando el backend de Laravel
-  async function handleImageChange(event) {
-    const file = event.target.files && event.target.files[0];
-    if (!file) return;
-
-    if (!authToken || !isAdmin) {
-      setImageUploadError(
-        "Debes iniciar sesión como administrador para subir imágenes."
-      );
-      return;
-    }
+    setAdminLoading(true);
 
     try {
-      setUploadingImage(true);
-      setImageUploadError("");
-      setAdminMessage("");
+      const isEdit = !!editingProduct;
+      const url = isEdit
+        ? `${API_BASE}/products/${editingProduct.id}`
+        : `${API_BASE}/products`;
+      const method = isEdit ? "PUT" : "POST";
 
-      const formData = new FormData();
-      formData.append("image", file);
-
-      const res = await fetch(`${API_BASE}/api/products/upload-image`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-          // NO ponemos Content-Type, lo añade el navegador (multipart/form-data)
-        },
-        body: formData,
-      });
-
-      if (!res.ok) {
-        if (res.status === 422) {
-          setImageUploadError("La imagen no es válida o es muy grande (máx. 2MB).");
-          return;
-        }
-        if (res.status === 403) {
-          setImageUploadError("Solo el administrador puede subir imágenes.");
-          return;
-        }
-        throw new Error(`Error al subir imagen: ${res.status}`);
-      }
-
-      const data = await res.json();
-
-      // Guardar URL devuelta por Laravel
-      setNewImageUrl(data.url);
-      setAdminMessage("Imagen subida correctamente. No olvides guardar el producto.");
-    } catch (err) {
-      console.error(err);
-      setImageUploadError("No se pudo subir la imagen. Intenta de nuevo.");
-    } finally {
-      setUploadingImage(false);
-    }
-  }
-
-  // Crear o actualizar producto (solo admin)
-  async function handleSubmitProduct(event) {
-    event.preventDefault();
-
-    if (!authToken || !isAdmin) {
-      setAdminError(
-        "Debes iniciar sesión como administrador para crear o editar productos."
-      );
-      return;
-    }
-
-    try {
-      setAdminSaving(true);
-      setAdminError("");
-
-      const body = {
-        name: newName,
-        description: newDescription || null,
-        price: Number(newPrice),
-        image_url: newImageUrl || null,
-        is_active: newIsActive,
+      const payload = {
+        name: adminName,
+        description: adminDescription,
+        price: adminPrice,
+        is_active: true,
       };
 
-      let res;
-      let method;
-      let url;
-
-      if (editingProduct) {
-        // Modo edición
-        method = "PUT";
-        url = `${API_BASE}/api/products/${editingProduct.id}`;
-      } else {
-        // Modo creación
-        method = "POST";
-        url = `${API_BASE}/api/products`;
-      }
-
-      res = await fetch(url, {
+      const response = await fetch(url, {
         method,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${authToken}`,
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(payload),
       });
 
-      if (!res.ok) {
-        if (res.status === 422) {
-          setAdminError("Datos inválidos. Revisa nombre y precio.");
-          return;
-        }
-        if (res.status === 403) {
-          setAdminError(
-            "Solo el administrador puede crear o editar productos."
-          );
-          return;
-        }
-        throw new Error(
-          `Error al ${editingProduct ? "actualizar" : "crear"} producto: ${
-            res.status
-          }`
-        );
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const msg =
+          errorData.message || "No se pudo guardar el producto en el backend.";
+        throw new Error(msg);
       }
 
-      const saved = await res.json();
+      const savedProduct = await response.json();
 
-      if (editingProduct) {
-        // Actualizar en la lista
-        setProducts((prev) =>
-          prev.map((p) => (p.id === saved.id ? saved : p))
+      // Si hay imagen, subirla
+      if (adminImageFile) {
+        const formData = new FormData();
+        formData.append("image", adminImageFile);
+
+        const imageResponse = await fetch(
+          `${API_BASE}/products/${savedProduct.id}/image`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: formData,
+          }
         );
-        setAdminMessage(`Producto "${saved.name}" actualizado correctamente.`);
-      } else {
-        // Insertar al inicio
-        setProducts((prev) => [saved, ...prev]);
-        setAdminMessage(`Producto "${saved.name}" creado correctamente.`);
+
+        if (!imageResponse.ok) {
+          console.warn("El producto se guardó, pero falló la subida de imagen");
+        }
       }
 
-      // Reset
+      // Refrescar productos
+      await fetchProducts();
       resetAdminForm();
-    } catch (err) {
-      console.error(err);
-      setAdminError(
-        `No se pudo ${
-          editingProduct ? "actualizar" : "crear"
-        } el producto. Intenta de nuevo.`
-      );
+    } catch (error) {
+      console.error(error);
+      setAdminError(error.message || "Error al guardar el producto.");
     } finally {
-      setAdminSaving(false);
+      setAdminLoading(false);
     }
-  }
+  };
 
-  // Eliminar producto (solo admin)
-  async function handleDeleteProduct(productId, productName) {
-    if (!authToken || !isAdmin) {
-      alert("Debes iniciar sesión como administrador para eliminar productos.");
+  const handleDeleteProduct = async (productId) => {
+    if (!authToken) {
+      alert("Debes iniciar sesión como admin.");
+      return;
+    }
+    if (!window.confirm("¿Seguro que deseas eliminar este producto?")) {
       return;
     }
 
-    const confirmed = window.confirm(
-      `¿Seguro que deseas eliminar el producto "${productName}"?`
-    );
-    if (!confirmed) return;
-
     try {
-      const res = await fetch(`${API_BASE}/api/products/${productId}`, {
+      const response = await fetch(`${API_BASE}/products/${productId}`, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${authToken}`,
         },
       });
-
-      if (!res.ok) {
-        if (res.status === 403) {
-          alert("Solo el administrador puede eliminar productos.");
-          return;
-        }
-        throw new Error(`Error al eliminar producto: ${res.status}`);
+      if (!response.ok) {
+        throw new Error("No se pudo eliminar el producto.");
       }
-
-      // Quitar el producto de la lista en memoria
-      setProducts((prev) => prev.filter((p) => p.id !== productId));
-
-      // Si estabas editando ese producto, resetear formulario
-      if (editingProduct && editingProduct.id === productId) {
-        resetAdminForm();
-      }
-    } catch (err) {
-      console.error(err);
-      alert("No se pudo eliminar el producto. Intenta de nuevo.");
+      await fetchProducts();
+    } catch (error) {
+      console.error(error);
+      alert("Ocurrió un error al eliminar el producto.");
     }
-  }
+  };
+
+  // =========================
+  // DETALLE DE PRODUCTO + COMENTARIOS
+  // =========================
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+
+  // Comentarios
+  const [comments, setComments] = useState([]);
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [commentsError, setCommentsError] = useState("");
+  const [newComment, setNewComment] = useState("");
+
+  const loadComments = async (productId) => {
+    try {
+      setLoadingComments(true);
+      setCommentsError("");
+      const response = await fetch(
+        `${API_BASE}/products/${productId}/comments`
+      );
+      if (!response.ok) {
+        throw new Error("No se pudieron cargar los comentarios");
+      }
+      const data = await response.json();
+      setComments(data);
+    } catch (error) {
+      console.error(error);
+      setCommentsError("Ocurrió un error al cargar los comentarios.");
+    } finally {
+      setLoadingComments(false);
+    }
+  };
+
+  const handleOpenProduct = (product) => {
+    setSelectedProduct(product);
+    setShowDetailModal(true);
+    setNewComment("");
+    loadComments(product.id);
+  };
+
+  const handleCloseModal = () => {
+    setShowDetailModal(false);
+    setSelectedProduct(null);
+    setComments([]);
+    setNewComment("");
+    setCommentsError("");
+  };
+
+  const handleSubmitComment = async (event) => {
+    event.preventDefault();
+
+    if (!selectedProduct) return;
+    if (!authToken) {
+      alert("Debes iniciar sesión para comentar.");
+      return;
+    }
+    if (!newComment.trim()) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/products/${selectedProduct.id}/comments`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({ content: newComment.trim() }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("No se pudo guardar el comentario");
+      }
+
+      const created = await response.json();
+      setComments((prev) => [created, ...prev]);
+      setNewComment("");
+    } catch (error) {
+      console.error(error);
+      alert("Ocurrió un error al guardar tu comentario.");
+    }
+  };
+
+  // =========================
+  // RENDER
+  // =========================
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100">
-      {/* HEADER */}
-      <header className="sticky top-0 border-b border-slate-800 bg-slate-900/90 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl flex-col gap-2 px-4 py-4 md:flex-row md:items-center md:justify-between">
+    <div className="min-h-screen bg-gradient-to-b from-emerald-50 via-lime-50 to-emerald-100 text-slate-900">
+      <div className="max-w-6xl mx-auto px-4 py-6 sm:py-10">
+        {/* HEADER */}
+        <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-2xl font-bold md:text-3xl">
-              NutriSnackTech · Catálogo de frutos deshidratados
+            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-emerald-900">
+              NutriSnackTech
             </h1>
-            <p className="text-sm text-slate-300">
-              Frontend en React + Tailwind consumiendo tu API Laravel.
+            <p className="text-sm sm:text-base text-emerald-800/80 mt-1">
+              Catálogo de frutos deshidratados · Frontend React + Laravel API
             </p>
           </div>
-
-          {/* Estado de sesión en el header */}
-          <div className="mt-3 flex flex-col items-start gap-2 md:mt-0 md:items-end">
-            {currentUser ? (
+          <div className="flex flex-col items-end gap-2">
+            {isLoggedIn && user ? (
               <>
-                <div className="text-right text-xs md:text-sm">
-                  <p className="font-medium">
-                    Sesión iniciada como{" "}
-                    <span className="text-amber-300">{currentUser.name}</span>
-                  </p>
-                  <p className="text-slate-300">
-                    Rol:{" "}
-                    <span className="font-semibold">
-                      {isAdmin ? "Administrador" : "Usuario"}
+                <span className="text-xs sm:text-sm text-emerald-900">
+                  Sesión iniciada como{" "}
+                  <span className="font-semibold">{user.name}</span>{" "}
+                  {isAdmin && (
+                    <span className="ml-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300">
+                      ADMIN
                     </span>
-                  </p>
-                </div>
+                  )}
+                </span>
                 <button
                   onClick={handleLogout}
-                  disabled={authLoading}
-                  className="rounded-full border border-slate-600 px-3 py-1 text-xs font-medium text-slate-100 hover:border-red-400 hover:text-red-300 disabled:opacity-60"
+                  className="text-xs sm:text-sm px-3 py-1 rounded-md border border-emerald-400 text-emerald-900 hover:bg-emerald-50"
                 >
                   Cerrar sesión
                 </button>
               </>
             ) : (
-              <p className="text-xs text-slate-300 md:text-sm">
-                No has iniciado sesión.
-              </p>
+              <span className="text-xs sm:text-sm text-emerald-900">
+                Inicia sesión o crea tu cuenta para administrar productos,
+                comentar y marcar favoritos.
+              </span>
             )}
           </div>
-        </div>
-      </header>
+        </header>
 
-      {/* MAIN */}
-      <main className="mx-auto max-w-5xl space-y-6 px-4 py-8">
-        {/* Tarjeta de autenticación */}
-        <section className="rounded-xl border border-slate-800 bg-slate-900/70 p-5 shadow-lg">
-          <div className="mb-3 flex items-center justify-between gap-4">
-            <h2 className="text-base font-semibold md:text-lg">
-              Autenticación
-            </h2>
+        {/* GRID PRINCIPAL */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+          {/* Columna IZQUIERDA: Catálogo */}
+          <section className="lg:col-span-2">
+            <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-sm border border-emerald-100 p-4 sm:p-5">
+              <div className="flex items-center justify-between gap-2 mb-4">
+                <div>
+                  <h2 className="text-lg sm:text-xl font-semibold text-emerald-900">
+                    Catálogo de productos
+                  </h2>
+                  <p className="text-xs sm:text-sm text-emerald-700">
+                    Vista pública. Cualquiera puede ver los productos.
+                  </p>
+                </div>
+              </div>
 
-            {!currentUser && (
-              <div className="flex gap-2 rounded-full border border-slate-700 bg-slate-900 p-1 text-xs">
+              {loadingProducts ? (
+                <p className="text-sm text-emerald-800">Cargando productos…</p>
+              ) : productsError ? (
+                <p className="text-sm text-red-600">{productsError}</p>
+              ) : products.length === 0 ? (
+                <p className="text-sm text-emerald-800">
+                  Aún no hay productos en el catálogo. Inicia sesión como
+                  administrador para crear el primero.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {products.map((product) => (
+                    <article
+                      key={product.id}
+                      className="group bg-gradient-to-b from-white to-emerald-50/60 rounded-xl border border-emerald-100 shadow-sm hover:shadow-md transition overflow-hidden flex flex-col"
+                    >
+                      <div
+                        className="relative aspect-[4/3] bg-emerald-100/40 cursor-pointer"
+                        onClick={() => handleOpenProduct(product)}
+                      >
+                        {product.image_url ? (
+                          <img
+                            src={product.image_url}
+                            alt={product.name}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-xs text-emerald-700/70">
+                            Imagen no disponible
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          className="absolute top-2 right-2 text-sm px-2 py-1 rounded-full bg-white/90 text-emerald-700 border border-emerald-200 hover:bg-emerald-50"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleFavoriteToggle(product.id);
+                          }}
+                        >
+                          <span className="mr-1">
+                            {isFavorite(product.id) ? "❤️" : "🤍"}
+                          </span>
+                          <span className="text-[11px]">
+                            {isFavorite(product.id) ? "Favorito" : "Favorito"}
+                          </span>
+                        </button>
+                      </div>
+                      <div className="flex-1 flex flex-col p-3 sm:p-4">
+                        <h3 className="font-semibold text-emerald-900 text-sm sm:text-base line-clamp-2">
+                          {product.name}
+                        </h3>
+                        <p className="mt-1 text-xs sm:text-sm text-emerald-700 line-clamp-3">
+                          {product.description}
+                        </p>
+                        <div className="mt-3 flex items-center justify-between">
+                          <span className="text-sm font-semibold text-emerald-900">
+                            {product.price ? `$${product.price}` : "—"}
+                          </span>
+                          <button
+                            onClick={() => handleOpenProduct(product)}
+                            className="text-xs px-3 py-1 rounded-full bg-emerald-600 text-white hover:bg-emerald-700"
+                          >
+                            Ver detalle
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Columna DERECHA: Auth + Admin */}
+          <aside className="space-y-4">
+             {/* Frase motivacional */}
+  <div className="bg-emerald-900 text-emerald-50 rounded-2xl shadow-sm border border-emerald-700/60 p-4 sm:p-5">
+    <h2 className="text-base sm:text-lg font-semibold flex items-center gap-2">
+      <span>✨ Frase motivacional</span>
+    </h2>
+
+    {loadingQuote ? (
+      <p className="mt-2 text-xs sm:text-sm text-emerald-100/90">
+        Cargando frase…
+      </p>
+    ) : quoteError ? (
+      <p className="mt-2 text-xs sm:text-sm text-red-200">{quoteError}</p>
+    ) : quote ? (
+      <>
+        <p className="mt-2 text-sm sm:text-base leading-snug">
+          “{quote.text}”
+        </p>
+        <p className="mt-1 text-xs text-emerald-100/70 text-right">
+          — {quote.author || "Anónimo"}
+        </p>
+      </>
+    ) : (
+      <p className="mt-2 text-xs sm:text-sm text-emerald-100/90">
+        No se pudo cargar la frase. Intenta de nuevo.
+      </p>
+    )}
+
+    <button
+      type="button"
+      onClick={fetchMotivationalQuote}
+      className="mt-3 inline-flex items-center justify-center rounded-full bg-emerald-100 text-emerald-900 px-3 py-1.5 text-xs sm:text-sm font-medium hover:bg-emerald-200 transition"
+    >
+      Otra frase
+    </button>
+  </div>
+
+            {/* Tarjeta de Autenticación */}
+            <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-sm border border-emerald-100 p-4 sm:p-5">
+              <div className="flex justify-between items-center mb-3">
+                <h2 className="text-base sm:text-lg font-semibold text-emerald-900">
+                  {authMode === "login"
+                    ? "Iniciar sesión"
+                    : "Crear cuenta nueva"}
+                </h2>
                 <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode("login");
-                    setAuthError("");
-                  }}
-                  className={`rounded-full px-3 py-1 font-medium ${
-                    authMode === "login"
-                      ? "bg-amber-500 text-slate-950"
-                      : "text-slate-200"
-                  }`}
+                  onClick={() =>
+                    setAuthMode((prev) =>
+                      prev === "login" ? "register" : "login"
+                    )
+                  }
+                  className="text-[11px] px-2 py-1 rounded-full border border-emerald-300 text-emerald-800 hover:bg-emerald-50"
                 >
-                  Iniciar sesión
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode("register");
-                    setAuthError("");
-                  }}
-                  className={`rounded-full px-3 py-1 font-medium ${
-                    authMode === "register"
-                      ? "bg-amber-500 text-slate-950"
-                      : "text-slate-200"
-                  }`}
-                >
-                  Crear cuenta
+                  {authMode === "login" ? "Registrarme" : "Ya tengo cuenta"}
                 </button>
               </div>
-            )}
-          </div>
 
-          {currentUser ? (
-            <p className="text-sm text-emerald-300">
-              Ya has iniciado sesión. Si eres administrador, puedes gestionar el
-              catálogo en el panel de administración.
-            </p>
-          ) : authMode === "login" ? (
-            <form
-              onSubmit={handleLogin}
-              className="flex flex-col gap-3 md:flex-row md:items-end"
-            >
-              <div className="flex-1">
-                <label className="mb-1 block text-xs font-medium text-slate-300">
-                  Correo electrónico
-                </label>
-                <input
-                  type="email"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="tu-correo@ejemplo.com"
-                  required
-                />
-              </div>
+              {authError && (
+                <p className="text-xs text-red-600 mb-2">{authError}</p>
+              )}
 
-              <div className="flex-1">
-                <label className="mb-1 block text-xs font-medium text-slate-300">
-                  Contraseña
-                </label>
-                <input
-                  type="password"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={authLoading}
-                className="mt-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-60 md:mt-0"
-              >
-                {authLoading ? "Iniciando..." : "Iniciar sesión"}
-              </button>
-            </form>
-          ) : (
-            <form
-              onSubmit={handleRegister}
-              className="grid gap-3 md:grid-cols-3 md:items-end"
-            >
-              <div className="md:col-span-1">
-                <label className="mb-1 block text-xs font-medium text-slate-300">
-                  Nombre
-                </label>
-                <input
-                  type="text"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Tu nombre"
-                  required
-                />
-              </div>
-
-              <div className="md:col-span-1">
-                <label className="mb-1 block text-xs font-medium text-slate-300">
-                  Correo electrónico
-                </label>
-                <input
-                  type="email"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="tu-correo@ejemplo.com"
-                  required
-                />
-              </div>
-
-              <div className="md:col-span-1">
-                <label className="mb-1 block text-xs font-medium text-slate-300">
-                  Contraseña
-                </label>
-                <input
-                  type="password"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                />
-              </div>
-
-              <div className="md:col-span-3 flex justify-end">
+              <form onSubmit={handleAuthSubmit} className="space-y-2">
+                {authMode === "register" && (
+                  <div className="space-y-1">
+                    <label className="text-xs text-emerald-800">
+                      Nombre completo
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full rounded-md border border-emerald-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
+                      value={authName}
+                      onChange={(e) => setAuthName(e.target.value)}
+                      required
+                    />
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <label className="text-xs text-emerald-800">Correo</label>
+                  <input
+                    type="email"
+                    className="w-full rounded-md border border-emerald-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-emerald-800">Contraseña</label>
+                  <input
+                    type="password"
+                    className="w-full rounded-md border border-emerald-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    required
+                  />
+                </div>
+                {authMode === "register" && (
+                  <div className="space-y-1">
+                    <label className="text-xs text-emerald-800">
+                      Confirmar contraseña
+                    </label>
+                    <input
+                      type="password"
+                      className="w-full rounded-md border border-emerald-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
+                      value={authPasswordConfirm}
+                      onChange={(e) => setAuthPasswordConfirm(e.target.value)}
+                      required
+                    />
+                  </div>
+                )}
                 <button
                   type="submit"
                   disabled={authLoading}
-                  className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-60"
+                  className="mt-2 w-full inline-flex items-center justify-center rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
                 >
-                  {authLoading ? "Creando cuenta..." : "Crear cuenta"}
+                  {authLoading
+                    ? "Procesando..."
+                    : authMode === "login"
+                    ? "Iniciar sesión"
+                    : "Registrarme"}
                 </button>
-              </div>
-            </form>
-          )}
-
-          {authError && (
-            <p className="mt-2 text-xs text-red-400">{authError}</p>
-          )}
-        </section>
-
-        {/* Panel administrador (solo visible si eres admin) */}
-        <section className="rounded-xl border border-amber-500/40 bg-slate-900/70 p-5 shadow-lg">
-          <div className="mb-3 flex items-center justify-between gap-4">
-            <h2 className="text-base font-semibold text-amber-300 md:text-lg">
-              Panel administrador · Gestión de productos
-            </h2>
-            <span className="rounded-full border border-amber-400/60 px-3 py-1 text-xs font-medium text-amber-300">
-              Solo administrador
-            </span>
-          </div>
-
-          {!currentUser && (
-            <p className="text-sm text-slate-300">
-              Inicia sesión como administrador para crear, editar o eliminar
-              productos.
-            </p>
-          )}
-
-          {currentUser && !isAdmin && (
-            <p className="text-sm text-slate-300">
-              Has iniciado sesión, pero no tienes rol de administrador. Solo un
-              administrador puede gestionar el catálogo.
-            </p>
-          )}
-
-          {currentUser && isAdmin && (
-            <>
-              <p className="mb-3 text-sm text-slate-300">
-                {editingProduct
-                  ? `Editando producto: "${editingProduct.name}"`
-                  : "Crea nuevos productos para el catálogo de NutriSnackTech."}
-              </p>
-
-              <form
-                onSubmit={handleSubmitProduct}
-                className="grid gap-3 md:grid-cols-2"
-              >
-                <div className="md:col-span-2">
-                  <label className="mb-1 block text-xs font-medium text-slate-300">
-                    Nombre del producto
-                  </label>
-                  <input
-                    type="text"
-                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    placeholder="Ej: Mango deshidratado 100 g"
-                    required
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="mb-1 block text-xs font-medium text-slate-300">
-                    Descripción
-                  </label>
-                  <textarea
-                    className="min-h-[60px] w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
-                    value={newDescription}
-                    onChange={(e) => setNewDescription(e.target.value)}
-                    placeholder="Breve descripción del producto..."
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-300">
-                    Precio (USD)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
-                    value={newPrice}
-                    onChange={(e) => setNewPrice(e.target.value)}
-                    placeholder="Ej: 3.50"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-300">
-                    Imagen del producto (Laravel Storage)
-                  </label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageChange}
-                    className="w-full text-xs text-slate-200"
-                  />
-                  {uploadingImage && (
-                    <p className="mt-1 text-[11px] text-slate-300">
-                      Subiendo imagen...
-                    </p>
-                  )}
-                  {imageUploadError && (
-                    <p className="mt-1 text-[11px] text-red-400">
-                      {imageUploadError}
-                    </p>
-                  )}
-                  {newImageUrl && (
-                    <div className="mt-2">
-                      <p className="mb-1 text-[11px] text-emerald-300">
-                        Imagen subida. Vista previa:
-                      </p>
-                      <img
-                        src={newImageUrl}
-                        alt="Vista previa producto"
-                        className="h-20 w-20 rounded-lg object-cover border border-slate-700"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <input
-                    id="is_active"
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-amber-500"
-                    checked={newIsActive}
-                    onChange={(e) => setNewIsActive(e.target.checked)}
-                  />
-                  <label
-                    htmlFor="is_active"
-                    className="text-xs font-medium text-slate-300"
-                  >
-                    Producto activo / visible en catálogo
-                  </label>
-                </div>
-
-                <div className="md:col-span-2 flex justify-end gap-2">
-                  {editingProduct && (
-                    <button
-                      type="button"
-                      onClick={resetAdminForm}
-                      className="rounded-lg border border-slate-500 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800"
-                    >
-                      Cancelar edición
-                    </button>
-                  )}
-
-                  <button
-                    type="submit"
-                    disabled={adminSaving || uploadingImage}
-                    className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-60"
-                  >
-                    {adminSaving
-                      ? editingProduct
-                        ? "Guardando..."
-                        : "Guardando..."
-                      : editingProduct
-                      ? "Guardar cambios"
-                      : "Crear producto"}
-                  </button>
-                </div>
               </form>
-
-              {adminMessage && (
-                <p className="mt-2 text-xs text-emerald-300">{adminMessage}</p>
-              )}
-              {adminError && (
-                <p className="mt-2 text-xs text-red-400">{adminError}</p>
-              )}
-            </>
-          )}
-        </section>
-
-        {/* Tarjeta del catálogo público */}
-        <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-6 shadow-lg">
-          <div className="mb-4 flex items-center justify-between gap-4">
-            <div>
-              <h2 className="text-lg font-semibold md:text-xl">
-                Catálogo de productos
-              </h2>
-              <p className="text-xs text-slate-300 md:text-sm">
-                Vista pública de los frutos deshidratados de NutriSnackTech.
-              </p>
             </div>
-            <span className="rounded-full border border-amber-400/60 px-3 py-1 text-xs font-medium text-amber-300">
-              {products.length} productos
-            </span>
-          </div>
 
-          {loadingProducts && (
-            <p className="text-sm text-slate-300">Cargando productos...</p>
-          )}
+            {/* Panel Admin */}
+            {isAdmin && (
+              <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-sm border border-emerald-100 p-4 sm:p-5">
+                <h2 className="text-base sm:text-lg font-semibold text-emerald-900 mb-2">
+                  Panel administrador
+                </h2>
+                <p className="text-xs text-emerald-700 mb-3">
+                  Crea, edita y elimina productos. Sube una imagen para cada
+                  producto.
+                </p>
 
-          {productsError && (
-            <p className="text-sm text-red-400">{productsError}</p>
-          )}
+                {adminError && (
+                  <p className="text-xs text-red-600 mb-2">{adminError}</p>
+                )}
 
-          {!loadingProducts && !productsError && products.length === 0 && (
-            <p className="text-sm text-slate-300">
-              Aún no hay productos en el catálogo. Crea algunos desde el panel
-              de administración.
-            </p>
-          )}
+                <form onSubmit={handleAdminSubmit} className="space-y-2">
+                  <div className="space-y-1">
+                    <label className="text-xs text-emerald-800">
+                      Nombre del producto
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full rounded-md border border-emerald-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
+                      value={adminName}
+                      onChange={(e) => setAdminName(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-emerald-800">
+                      Descripción
+                    </label>
+                    <textarea
+                      className="w-full rounded-md border border-emerald-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
+                      rows={2}
+                      value={adminDescription}
+                      onChange={(e) => setAdminDescription(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-emerald-800">
+                      Precio (USD)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="w-full rounded-md border border-emerald-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
+                      value={adminPrice}
+                      onChange={(e) => setAdminPrice(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-emerald-800">
+                      Imagen (opcional)
+                    </label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="w-full text-xs"
+                      onChange={(e) =>
+                        setAdminImageFile(e.target.files?.[0] || null)
+                      }
+                    />
+                  </div>
 
-          {!loadingProducts && !productsError && products.length > 0 && (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {products.map((product) => (
-                <article
-                  key={product.id}
-                  className="flex flex-col overflow-hidden rounded-xl border border-slate-800 bg-slate-900/80 shadow-md transition hover:border-amber-400/70 hover:shadow-amber-400/20"
-                >
-                  {/* Imagen o degradado */}
-                  {product.image_url ? (
-                    <div className="h-32 w-full overflow-hidden border-b border-slate-800 bg-slate-900">
-                      <img
-                        src={product.image_url}
-                        alt={product.name}
-                        className="h-full w-full object-cover"
-                      />
-                    </div>
-                  ) : (
-                    <div className="h-32 bg-gradient-to-br from-amber-400/40 via-amber-500/20 to-amber-900/30" />
-                  )}
-
-                  <div className="flex flex-1 flex-col gap-2 px-4 py-3">
-                    <h3 className="text-sm font-semibold md:text-base">
-                      {product.name}
-                    </h3>
-                    {product.description && (
-                      <p className="text-xs text-slate-300 md:text-sm">
-                        {product.description}
-                      </p>
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    <button
+                      type="submit"
+                      disabled={adminLoading}
+                      className="inline-flex items-center justify-center rounded-md bg-emerald-600 px-3 py-1.5 text-xs sm:text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      {adminLoading
+                        ? "Guardando..."
+                        : editingProduct
+                        ? "Actualizar producto"
+                        : "Crear producto"}
+                    </button>
+                    {editingProduct && (
+                      <button
+                        type="button"
+                        onClick={resetAdminForm}
+                        className="text-[11px] px-2 py-1 rounded-md border border-emerald-300 text-emerald-800 hover:bg-emerald-50"
+                      >
+                        Cancelar edición
+                      </button>
                     )}
+                  </div>
+                </form>
 
-                    <div className="mt-auto flex items-center justify-between pt-2">
-                      <span className="text-sm font-semibold text-amber-300">
-                        ${Number(product.price).toFixed(2)}
-                      </span>
-                      <span className="rounded-full border border-emerald-400/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">
-                        Disponible
-                      </span>
-                    </div>
+                {/* Lista rápida de productos para editar/eliminar */}
+                <div className="mt-4 border-t border-emerald-100 pt-3">
+                  <h3 className="text-xs font-semibold text-emerald-900 mb-2">
+                    Productos existentes
+                  </h3>
+                  {products.length === 0 ? (
+                    <p className="text-xs text-emerald-700">
+                      No hay productos todavía.
+                    </p>
+                  ) : (
+                    <ul className="space-y-1 max-h-52 overflow-y-auto pr-1">
+                      {products.map((p) => (
+                        <li
+                          key={p.id}
+                          className="flex items-center justify-between text-xs bg-emerald-50/60 rounded-md px-2 py-1"
+                        >
+                          <span className="truncate max-w-[55%]">
+                            {p.name}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => startEditProduct(p)}
+                              className="px-2 py-0.5 rounded-md border border-emerald-300 text-emerald-800 hover:bg-emerald-100"
+                            >
+                              Editar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteProduct(p.id)}
+                              className="px-2 py-0.5 rounded-md border border-red-300 text-red-700 hover:bg-red-50"
+                            >
+                              Eliminar
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
+          </aside>
+        </div>
 
-                    {isAdmin && (
-                      <div className="mt-3 flex justify-between gap-2">
-                        <button
-                          type="button"
-                          onClick={() => startEditing(product)}
-                          className="rounded-lg border border-amber-400/70 px-3 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-500/10"
-                        >
-                          Editar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleDeleteProduct(product.id, product.name)
-                          }
-                          className="rounded-lg border border-red-500/60 px-3 py-1 text-xs font-semibold text-red-300 hover:bg-red-500/10"
-                        >
-                          Eliminar
-                        </button>
+        {/* MODAL DETALLE PRODUCTO */}
+        {showDetailModal && selectedProduct && (
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
+            <div className="relative max-w-xl w-full bg-white rounded-2xl shadow-xl border border-emerald-100 p-4 sm:p-6">
+              <button
+                onClick={handleCloseModal}
+                className="absolute top-3 right-3 text-xs px-2 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
+              >
+                Cerrar
+              </button>
+
+              <div className="flex flex-col sm:flex-row gap-4">
+                <div className="sm:w-1/2">
+                  <div className="aspect-[4/3] rounded-xl bg-emerald-100 overflow-hidden mb-2">
+                    {selectedProduct.image_url ? (
+                      <img
+                        src={selectedProduct.image_url}
+                        alt={selectedProduct.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-xs text-emerald-700/70">
+                        Imagen no disponible
                       </div>
                     )}
                   </div>
-                </article>
-              ))}
+                  <button
+                    type="button"
+                    className="text-xs px-3 py-1.5 rounded-full bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-50 flex items-center gap-1"
+                    onClick={() => handleFavoriteToggle(selectedProduct.id)}
+                  >
+                    <span>{isFavorite(selectedProduct.id) ? "❤️" : "🤍"}</span>
+                    <span>
+                      {isFavorite(selectedProduct.id)
+                        ? "Quitar de favoritos"
+                        : "Agregar a favoritos"}
+                    </span>
+                  </button>
+                </div>
+
+                <div className="sm:w-1/2 flex flex-col">
+                  <h2 className="text-lg sm:text-xl font-semibold text-emerald-900">
+                    {selectedProduct.name}
+                  </h2>
+                  <p className="mt-1 text-sm text-emerald-800">
+                    {selectedProduct.description}
+                  </p>
+                  <p className="mt-2 text-base font-semibold text-emerald-900">
+                    {selectedProduct.price
+                      ? `$${selectedProduct.price}`
+                      : "—"}
+                  </p>
+
+                  {/* Sección de comentarios */}
+                  <div className="mt-4 border-t border-emerald-100 pt-3 flex-1 flex flex-col">
+                    <h3 className="text-sm font-semibold text-emerald-900 mb-2">
+                      Comentarios
+                    </h3>
+
+                    {loadingComments && (
+                      <p className="text-xs text-emerald-700">
+                        Cargando comentarios…
+                      </p>
+                    )}
+
+                    {commentsError && (
+                      <p className="text-xs text-red-600">{commentsError}</p>
+                    )}
+
+                    {!loadingComments && comments.length === 0 && !commentsError && (
+                      <p className="text-xs text-emerald-700">
+                        Aún no hay comentarios para este producto. ¡Sé la
+                        primera en comentar!
+                      </p>
+                    )}
+
+                    <ul className="space-y-2 mb-3 max-h-32 overflow-y-auto pr-1">
+                      {comments.map((comment) => (
+                        <li
+                          key={comment.id}
+                          className="bg-emerald-50/80 rounded-lg px-3 py-2 text-xs"
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-semibold text-emerald-900">
+                              {comment.user?.name ?? "Usuario"}
+                            </span>
+                            <span className="text-[10px] text-emerald-700/80">
+                              {comment.created_at
+                                ? new Date(
+                                    comment.created_at
+                                  ).toLocaleString()
+                                : ""}
+                            </span>
+                          </div>
+                          <p className="text-emerald-900 break-words">
+                            {comment.content}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+
+                    {isLoggedIn ? (
+                      <form
+                        onSubmit={handleSubmitComment}
+                        className="mt-auto space-y-1"
+                      >
+                        <label className="block text-[11px] text-emerald-800">
+                          Escribe tu comentario (máx. 200 caracteres)
+                        </label>
+                        <textarea
+                          className="w-full rounded-md border border-emerald-200 px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
+                          rows={3}
+                          maxLength={200}
+                          value={newComment}
+                          onChange={(e) => setNewComment(e.target.value)}
+                          placeholder="Me encantó este snack, es perfecto para llevar al trabajo…"
+                        />
+                        <div className="flex items-center justify-between text-[10px] text-emerald-700/80">
+                          <span>{newComment.length}/200</span>
+                          <button
+                            type="submit"
+                            disabled={!newComment.trim()}
+                            className="inline-flex items-center rounded-md bg-emerald-600 px-3 py-1 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                          >
+                            Publicar comentario
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <p className="mt-1 text-[11px] text-emerald-700/90">
+                        Inicia sesión para dejar un comentario sobre este
+                        producto.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
-          )}
-        </section>
-      </main>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
