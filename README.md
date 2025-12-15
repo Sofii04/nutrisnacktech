@@ -1,106 +1,69 @@
 # NutriSnackTech · Catálogo de frutos deshidratados
 
-Proyecto de Aplicaciones Web: mini catálogo de productos para **NutriSnackTech**, una marca ficticia de frutos deshidratados.
+Aplicación web full-stack para gestionar el catálogo de productos de **NutriSnackTech**, una marca de frutos deshidratados.
 
-La aplicación está dividida en dos partes:
+La solución está dividida en:
 
-- **Backend**: API REST en Laravel con autenticación vía **Sanctum**.
-- **Frontend**: SPA en **React + Vite + Tailwind CSS** que consume la API.
+- **Backend**: API REST en **Laravel 11** con autenticación mediante **Sanctum**.
+- **Frontend**: SPA en **React + Vite + Tailwind CSS**.
+
+La app permite:
+
+- Ver un catálogo público de frutos deshidratados.
+- Ver el detalle de cada producto.
+- Registrarse, iniciar sesión y comentar productos.
+- Marcar productos como favoritos.
+- Administrar productos (solo rol administrador).
+- Subir imágenes de productos (guardadas en `storage` de Laravel).
+- Mostrar una **frase motivacional** consumida desde una API externa.
 
 ---
 
-## 1. Funcionalidades principales
+## 🧱 Estructura del proyecto
 
-### Autenticación
+```bash
+mini-catalogo/
+├── backend/        # API Laravel (Sanctum, productos, favoritos, comentarios, motivación)
+└── frontend/       # SPA React + Vite + Tailwind
+⚙️ Backend (Laravel)
+Requisitos previos
+PHP 8.2+ (tú usas 8.5)
 
-- Crear cuenta (registro) desde el frontend.
-- Iniciar sesión.
-- Cerrar sesión.
-- Manejo de sesión con **tokens de Laravel Sanctum** guardados en `localStorage`.
+Composer
 
-### Roles y permisos
+SQLite (o cualquier BD soportada por Laravel)
 
-- Campo `is_admin` en la tabla `users`.
-- Solo el **administrador** puede:
-  - Crear productos.
-  - Editar productos.
-  - Eliminar productos.
-  - Subir una imagen por producto.
-- Los **usuarios normales** solo pueden:
-  - Registrarse / iniciar sesión.
-  - Ver el catálogo público de productos.
-
-### Gestión de productos
-
-- CRUD completo de productos desde un panel administrador:
-  - Nombre.
-  - Descripción.
-  - Precio.
-  - URL de imagen.
-  - Estado `is_active` (visible o no en el catálogo).
-- Catálogo público que lista los productos activos.
-
-### Imágenes de productos
-
-- Las imágenes se suben desde el frontend mediante un `input type="file"`.
-- El archivo se envía al backend mediante una petición `POST` a:
-
-  ```http
-  POST /api/products/upload-image
-
-2. Tecnologías utilizadas
-Backend
-
-PHP 8.5
-
-Laravel (versión del proyecto composer.json)
-
-Laravel Sanctum (auth por token)
-
-MySQL / MariaDB (o el motor configurado en .env)
-
-Frontend
-
-Node.js 23 + npm
-
-Vite
-
-React
-
-Tailwind CSS (@tailwindcss/postcss)
-
-3. Cómo ejecutar el proyecto
-3.1. Clonar el repositorio
-git clone https://github.com/Sofii04/nutrisnacktech.git
-cd nutrisnacktech
-
-3.2. Backend (Laravel)
-
-Entrar al directorio del backend:
-
+Instalación
+bash
+Copiar código
 cd backend
 
-1) Instalar dependencias de PHP
+# 1. Instalar dependencias
 composer install
 
-2) Crear archivo .env
+# 2. Copiar archivo de entorno
 cp .env.example .env
 
-
-Editar .env para configurar:
-
-Conexión a base de datos (DB_DATABASE, DB_USERNAME, DB_PASSWORD, etc.).
-
-Opcionalmente el APP_URL (ej: http://127.0.0.1:8000).
-
-3) Generar la key de la aplicación
+# 3. Generar APP_KEY
 php artisan key:generate
+Base de datos (SQLite recomendado)
+En .env configura algo como:
 
-4) Ejecutar migraciones
+env
+Copiar código
+DB_CONNECTION=sqlite
+DB_DATABASE=/ruta/completa/a/mini-catalogo/backend/database/database.sqlite
+Crear el archivo si no existe:
+
+bash
+Copiar código
+touch database/database.sqlite
+Luego ejecutar migraciones:
+
+bash
+Copiar código
 php artisan migrate
-
-
-Esto crea las tablas:
+Esto crea:
 
 users
 
@@ -108,116 +71,260 @@ personal_access_tokens
 
 products
 
-etc.
+favorites
 
-5) Crear enlace de storage (solo una vez)
+comments
+
+tablas de cache / jobs de Laravel.
+
+Storage de imágenes
+Para servir imágenes desde /storage:
+
+bash
+Copiar código
 php artisan storage:link
+Las imágenes de productos se guardan en:
 
-6) Levantar el servidor de Laravel
-php artisan serve
+text
+Copiar código
+storage/app/public/products
+y se exponen bajo:
 
+text
+Copiar código
+http://127.0.0.1:8000/storage/products/xxxx.jpg
+Usuario administrador
+El rol se maneja con el campo is_admin en la tabla users.
 
-Por defecto la API quedará disponible en:
+Puedes marcar un usuario como admin desde Tinker:
 
-http://127.0.0.1:8000
-
-3.3. Frontend (React + Vite)
-
-En otra terminal, desde la raíz del repositorio:
-
-cd frontend
-npm install
-npm run dev
-
-
-Vite mostrará algo como:
-
-VITE vX.X.X  ready in XXX ms
-  ➜  Local:   http://localhost:5173/
-
-
-Abrir el navegador en:
-
-http://localhost:5173/
-
-4. Flujo de uso
-
-Registrar usuario (opcional)
-Desde la tarjeta de Autenticación en el frontend:
-
-Cambiar a pestaña Crear cuenta.
-
-Ingresar nombre, correo y contraseña.
-
-Se crea el usuario y queda logueado automáticamente.
-
-Convertir un usuario en administrador
-En la práctica, se marca el campo is_admin = 1 directamente desde tinker o la BD:
-
+bash
+Copiar código
 php artisan tinker
 
->>> $user = \App\Models\User::where('email', 'sofy@test.com')->first();
->>> $user->is_admin = 1;
->>> $user->save();
+$user = \App\Models\User::where('email', 'tu_correo@test.com')->first();
+$user->is_admin = true;
+$user->save();
+exit
+Ese usuario verá el panel de administración en el frontend.
 
+Levantar el servidor
+bash
+Copiar código
+php artisan serve
+Por defecto:
 
-Iniciar sesión
-Desde la pestaña Iniciar sesión, ingresar correo y contraseña.
-El token se guarda en localStorage y el encabezado muestra:
+text
+Copiar código
+http://127.0.0.1:8000
+La API se expone bajo /api/....
 
-Nombre de usuario.
+🧩 Endpoints principales (API)
+Autenticación
+POST /api/auth/register
+Registra un usuario nuevo y devuelve token + datos.
 
-Rol (Administrador / Usuario).
+POST /api/auth/login
+Devuelve token + datos del usuario.
 
-Panel administrador
-Visible solo si el usuario tiene is_admin = 1:
+GET /api/auth/me
+Devuelve el usuario autenticado (requiere Authorization: Bearer <token>).
 
-Crear nuevos productos.
+POST /api/auth/logout
+Revoca el token actual.
+
+Productos
+Públicos:
+
+GET /api/products
+Lista productos activos.
+
+GET /api/products/{product}
+Devuelve el detalle de un producto.
+
+Solo admin (autenticado):
+
+POST /api/products
+Crea un producto (nombre, descripción, precio, image_url, etc.).
+
+PUT /api/products/{product}
+Actualiza producto.
+
+DELETE /api/products/{product}
+Elimina producto.
+
+Imágenes de productos
+La creación/edición de productos desde el frontend admin envía el archivo al backend, que:
+
+Lo guarda en storage/app/public/products.
+
+Actualiza el campo image_url en la tabla products.
+
+Favoritos
+Autenticado:
+
+POST /api/products/{product}/favorite
+Marca/desmarca producto como favorito para el usuario.
+
+GET /api/favorites
+Lista los productos favoritos del usuario logueado.
+
+Comentarios
+GET /api/products/{product}/comments
+Lista comentarios de ese producto con nombre del autor.
+
+POST /api/products/{product}/comments
+Crea un comentario (requiere estar logueado).
+
+Frase motivacional (API externa)
+GET /api/motivation
+
+Llama a la API pública de Quotable (https://api.quotable.io/random).
+Si falla, devuelve una frase local:
+
+json
+Copiar código
+{
+  "text": "Cree en ti misma; cada pequeño paso cuenta 💚",
+  "author": "NutriSnackTech"
+}
+💻 Frontend (React + Vite + Tailwind)
+Requisitos previos
+Node.js 18+ (tú usas v23.9.0)
+
+npm
+
+Instalación
+bash
+Copiar código
+cd frontend
+
+# Instalar dependencias
+npm install
+Ejecutar en desarrollo
+bash
+Copiar código
+npm run dev
+Por defecto:
+
+text
+Copiar código
+http://localhost:5173
+Asegúrate de que el backend está levantado en:
+
+text
+Copiar código
+http://127.0.0.1:8000
+La app usa:
+
+js
+Copiar código
+const API_BASE = "http://127.0.0.1:8000/api";
+🧑‍💻 Funcionalidades del frontend
+Landing / Catálogo
+
+Diseño juvenil con fondo verde claro.
+
+Lista de productos con imagen, nombre, descripción corta y precio.
+
+Vista de detalle del producto con:
+
+Imagen grande.
+
+Descripción.
+
+Precio.
+
+Comentarios del producto.
+
+Formulario para comentar (si estás logueada).
+
+Autenticación
+
+Registro de usuarios (nombre, email, password).
+
+Login con email/password.
+
+Manejo de token con Authorization: Bearer <token> en las peticiones protegidas.
+
+Cierre de sesión.
+
+Rol administrador
+
+Solo el admin ve el panel de administración.
+
+Desde ahí puede:
+
+Crear productos nuevos.
 
 Editar productos existentes.
 
 Eliminar productos.
 
-Subir imágenes (input file → se envía al endpoint /api/products/upload-image).
+Subir imagen para cada producto.
 
-Catálogo público
-Siempre visible:
+Favoritos
 
-Lista los productos (nombre, descripción, precio, imagen si existe).
+Botón para marcar/desmarcar favorito en las tarjetas/detalles.
 
-Los usuarios no administradores solo consumen la información.
+El estado se guarda en el backend (tabla favorites).
 
-5. Endpoints principales de la API
-Autenticación
+Comentarios
 
-POST /api/auth/register
-Registra un nuevo usuario y devuelve token.
+Cada producto muestra sus comentarios.
 
-POST /api/auth/login
-Inicia sesión y devuelve token.
+Usuarios logueados pueden enviar nuevos comentarios.
 
-POST /api/auth/logout
-Cierra sesión (requiere token).
+Frase motivacional
 
-GET /api/auth/me
-Devuelve los datos del usuario autenticado.
+Tarjeta “✨ Frase motivacional” en el frontend.
 
-Productos
+Consume GET /api/motivation.
 
-GET /api/products
-Lista de productos (catálogo).
+Botón “Otra frase” que vuelve a llamar a la API.
 
-GET /api/products/{id}
-Detalle de un producto.
+Si algo falla, se muestra una frase local de NutriSnackTech.
 
-POST /api/products
-Crear producto (solo admin, requiere token).
+🧪 Flujo recomendado para probar
+Levantar backend:
 
-PUT /api/products/{id}
-Actualizar producto (solo admin, requiere token).
+bash
+Copiar código
+cd backend
+php artisan serve
+Levantar frontend:
 
-DELETE /api/products/{id}
-Eliminar producto (solo admin, requiere token).
+bash
+Copiar código
+cd frontend
+npm run dev
+En el navegador (http://localhost:5173):
 
-POST /api/products/upload-image
-Subir imagen y devolver URL pública (solo admin, requiere token).
+Crear una cuenta desde el frontend.
+
+Marcar ese usuario como admin en BD (si quieres administrar productos).
+
+Crear productos desde el panel admin.
+
+Subir imágenes.
+
+Ver catálogo público.
+
+Probar login/logout.
+
+Marcar productos como favoritos.
+
+Agregar comentarios.
+
+Probar el botón de “Otra frase” en la tarjeta motivacional.
+
+📝 Notas
+El proyecto está pensado como base para un examen de Aplicaciones Web, por lo que prioriza:
+
+Organización del código (backend y frontend separados).
+
+Uso de buenas prácticas (rutas protegidas, roles, migraciones).
+
+Diseño limpio y juvenil con Tailwind CSS.
+
+La API externa utilizada no requiere API Key, lo que simplifica la configuración.
